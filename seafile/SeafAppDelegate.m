@@ -20,7 +20,7 @@
 #import "Version.h"
 
 
-@interface SeafAppDelegate () <UITabBarControllerDelegate, PHPhotoLibraryChangeObserver, CLLocationManagerDelegate>
+@interface SeafAppDelegate () <UITabBarControllerDelegate, PHPhotoLibraryChangeObserver, CLLocationManagerDelegate,SeafPhotoSyncWatcherDelegate>
 
 @property UIBackgroundTaskIdentifier bgTask;
 
@@ -30,6 +30,7 @@
 @property (readonly) UINavigationController *disDetailNav;
 @property (strong) NSArray *viewControllers;
 @property (readwrite) SeafGlobal *global;
+
 
 @property (strong, nonatomic) dispatch_block_t expirationHandler;
 @property BOOL background;
@@ -281,6 +282,7 @@
     __weak typeof(self) weakSelf = self;
     self.expirationHandler = ^{
         Debug("Expired, Time Remain = %f, restart background task.", [application backgroundTimeRemaining]);
+        
         [weakSelf startBackgroundTask];
     };
 
@@ -305,8 +307,13 @@
         [app endBackgroundTask:self.bgTask];
         self.bgTask = UIBackgroundTaskInvalid;
     }
-    if (!self.shouldContinue) return;
+
+    if (self.shouldContinue){
+        [self badgeChange];
+    } else
+        return;
     Debug("start background task");
+    
     self.bgTask = [app beginBackgroundTaskWithExpirationHandler:self.expirationHandler];
 }
 
@@ -350,6 +357,11 @@
 
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
+    UIUserNotificationSettings* notificationSettings = [UIUserNotificationSettings settingsForTypes:UIUserNotificationTypeBadge  categories:nil];
+    
+    [[UIApplication sharedApplication] registerUserNotificationSettings:notificationSettings];
+    
+    
     [self enterBackground];
     for (id <SeafBackgroundMonitor> monitor in _monitors) {
         [monitor enterBackground];
@@ -360,6 +372,7 @@
         self.autoBackToDefaultAccount = true;
     } else
         self.autoBackToDefaultAccount = false;
+    
 }
 
 - (void)applicationWillEnterForeground:(UIApplication *)application
@@ -374,6 +387,8 @@
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
+    [UIApplication sharedApplication].applicationIconBadgeNumber = 0;
+    
     if (!self.background)
         return;
     // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
@@ -390,6 +405,8 @@
 {
     // Saves changes in the application's managed object context before the application terminates.
 }
+
+
 
 - (BOOL)tabBarController:(UITabBarController *)tabBarController shouldSelectViewController:(UIViewController *)viewController
 {
@@ -627,6 +644,24 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5*NSEC_PER_SEC), dispatch_get_main_queue(), ^(void){
         [appdelegate checkOpenLink:c];
     });
+}
+
+#pragma mark - badge change
+-(void)badgeChange{
+
+    UIUserNotificationSettings* notificationSettings = [UIUserNotificationSettings settingsForTypes:UIUserNotificationTypeBadge  categories:nil];
+    
+    [[UIApplication sharedApplication] registerUserNotificationSettings:notificationSettings];
+    
+    for (SeafConnection *conn in SeafGlobal.sharedObject.conns) {
+        conn.photSyncWatcher = self;
+    }
+}
+
+-(void)photoSyncChanged:(long)remain
+{
+    Debug(@"remain photo %ld", remain);
+    [UIApplication sharedApplication].applicationIconBadgeNumber = remain;
 }
 
 @end
